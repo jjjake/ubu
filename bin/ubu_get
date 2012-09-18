@@ -1,0 +1,86 @@
+#!/usr/bin/env python
+import os
+import re
+from lxml import etree
+import logging,logging.config
+from subprocess import call
+from time import sleep
+
+from ubu import UbuCollection, UbuArtist, UbuItem
+
+
+logging.config.fileConfig('logging.conf')
+cLogger = logging.getLogger('console')
+ROOT_DIR = os.getcwd()
+ITEM_DIR = os.path.join(ROOT_DIR, 'items')
+if not os.path.exists(ITEM_DIR):
+    os.mkdir(ITEM_DIR)
+
+collection = UbuCollection('http://ubu.com/film/').get_artist_urls()
+
+
+#______________________________________________________________________________
+def write_xml(meta_dict):
+    f = open("%s_files.xml" % meta_dict['identifier'], "wb")
+    f.write("<files />")
+    f.close()
+
+    root = etree.Element("metadata")
+    for k,v in meta_dict.iteritems():
+        subElement = etree.SubElement(root,k)
+        subElement.text = v
+    meta_xml = etree.tostring(root, pretty_print=True,
+                             xml_declaration=True, encoding="utf-8")
+    ff = open("%s_meta.xml" % meta_dict['identifier'], "wb")
+    ff.write(meta_xml)
+    ff.close()
+
+#______________________________________________________________________________
+def main():
+    for artist in collection:
+        artist = UbuArtist(artist)
+        items = artist.get_item_urls()
+        for item in items:
+            os.chdir(ITEM_DIR)
+            item = UbuItem(item)
+
+            print '\n\n---\n\n'
+            print item.item_url
+
+            identifier = 'ubu-%s' % item.item_url.split('/')[-1].strip('.html')
+            directory = os.path.join(ITEM_DIR, identifier)
+            if not os.path.exists(directory):
+                os.mkdir(directory)
+            os.chdir(directory)
+
+            call('wget -nc -q "%s"' % item.item_url, shell=True)
+
+            src_meta = item.get_metadata()
+            if src_meta['source'] is None:
+                logging.error("No video URL!\t%s" % item.item_url)
+                continue
+            
+            call('wget -nc -q "%s"' % src_meta['source'], shell=True)
+
+            if src_meta['title'] is None:
+                logging.warning("No title!\t%s" % item.item_url)
+            if src_meta['date'] is None:
+                logging.warning("No date!\t%s" % item.item_url)
+
+            meta_dict = {'creator': artist.creator,
+                         'mediatype': 'movies',
+                         'collection': 'ubu_com',
+                         'description': src_meta['description'],
+                         'title': src_meta['title'],
+                         'date': src_meta['date'],
+                         'source': item.item_url,
+                         'identifier': identifier,
+            }
+            meta_dict = {k: v for k,v in meta_dict.iteritems() if v != None}
+
+            video_url = src_meta['source']
+            sleep(5)
+            write_xml(meta_dict)
+
+if __name__ == '__main__':
+    main()
